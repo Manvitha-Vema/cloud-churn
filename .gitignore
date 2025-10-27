@@ -1,0 +1,16 @@
+# Python cache and virtual environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Virtual environment
+churn_env/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Misc
+.DS_Store
+.env
