@@ -186,7 +186,7 @@ def fit_xgb(X_train, y_train, X_valid=None, y_valid=None, random_state=42):
 
     model = xgb.XGBClassifier(
         n_estimators=600,#600
-        learning_rate=0.2,
+        learning_rate=0.3,
         max_depth=6,#6
         min_child_weight=3, #3
         subsample=0.85,#0.85
