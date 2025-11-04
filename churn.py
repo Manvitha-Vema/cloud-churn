@@ -4,7 +4,6 @@ warnings.filterwarnings("ignore")
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (accuracy_score, precision_score, recall_score,
@@ -12,7 +11,6 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score,
 import xgboost as xgb
 import shap
 from copy import deepcopy
-
 
 # Helper utilities
 
@@ -24,7 +22,8 @@ def find_target_column(df):
         low = c.lower()
         if any(k in low for k in keywords):
             candidates.append(c)
-    # fallback: any boolean-like or binary column
+
+    #fallback: any boolean-like or binary column
     if not candidates:
         for c in df.columns:
             if df[c].dropna().isin([0,1,'0','1',True,False,'True','False']).all():
@@ -41,11 +40,11 @@ def drop_uninformative_columns(df, missing_thresh=0.5):
     n = len(df)
     drop_cols = []
 
-    # Drop columns with > missing_thresh fraction missing
+    # Drop columns > missing_thresh 
     miss_frac = df.isnull().mean()
     drop_cols += miss_frac[miss_frac > missing_thresh].index.tolist()
 
-    # Drop columns that are constants
+    # Drop columns-constants
     nunique = df.nunique(dropna=False)
     drop_cols += nunique[nunique <= 1].index.tolist()
 
@@ -62,18 +61,18 @@ def drop_uninformative_columns(df, missing_thresh=0.5):
     return df, drop_cols
 
 def convert_dates_and_numbers(df):
-    # Try to parse datelike columns
+    #parse datelike columns
     for c in df.columns:
         if df[c].dtype == object:
-            # try datetime
+            #datetime
             parsed = pd.to_datetime(df[c], errors='coerce', infer_datetime_format=True)
-            if parsed.notna().sum() > 0.4 * len(df):  # fairly datelike
+            if parsed.notna().sum() > 0.4 * len(df):
                 df[c + "_year"] = parsed.dt.year.fillna(-1).astype(int)
                 df[c + "_month"] = parsed.dt.month.fillna(-1).astype(int)
                 df[c + "_day"] = parsed.dt.day.fillna(-1).astype(int)
                 df.drop(columns=[c], inplace=True)
                 continue
-            # try numeric conversion
+            #numeric conversion
             numconv = pd.to_numeric(df[c].str.replace(',',''), errors='coerce')
             if numconv.notna().sum() > 0.5 * len(df):
                 df[c] = numconv
@@ -93,42 +92,42 @@ def encode_categoricals(df, exclude_cols=None):
     return df, le_dict
 
 
-def prepare_data(df):
-    # 1) find target
+def prepare_data(df, balance=True):
+    """Preprocess dataset: detect target, clean columns, encode categoricals, and balance classes if needed."""
     target_col = find_target_column(df)
     print(f"Auto-detected target column: '{target_col}'")
 
-    # 2) drop uninformative columns
+    # Drop uninformative columns
     df, dropped = drop_uninformative_columns(df, missing_thresh=0.5)
     if dropped:
         print("Dropped uninformative columns:", dropped)
 
-    # 3) convert numerics and datetimes
+    # Convert datelike/numeric columns
     df = convert_dates_and_numbers(df)
 
-    # 4) remove constant cols again
+    # Remove constant cols again
     df = df.loc[:, df.nunique(dropna=False) > 1]
 
-    # 5) separate X and y
+    # Separate X and y
     if target_col not in df.columns:
         raise ValueError(f"Target column '{target_col}' disappeared after cleaning.")
     y = df[target_col]
     X = df.drop(columns=[target_col])
 
-    # 6) Remove any other churn/attrition-like columns from features
-    churn_keywords = ['churn', 'attrition', 'exited', 'cancel', 'canceled', 'closed']
+    # Remove other churn-like columns
+    churn_keywords = ['churn', 'attrition', 'exited', 'cancel', 'canceled', 'closed','Response','target']
     other_churn_cols = [c for c in X.columns if any(k in c.lower() for k in churn_keywords)]
     if other_churn_cols:
         X = X.drop(columns=other_churn_cols)
         print("Removed other churn-like columns from features:", other_churn_cols)
 
-    # 7) target clean-up: binary encoding
+    # Target cleanup (binary)
     if y.dtype == object or y.dtype.name == 'category':
         y = y.fillna("##MISSING##").astype(str)
         le_target = LabelEncoder().fit(y)
         y_enc = le_target.transform(y)
         if len(le_target.classes_) != 2:
-            raise ValueError(f"Target column '{target_col}' has {len(le_target.classes_)} classes. This pipeline expects binary churn.")
+            raise ValueError(f"Target column '{target_col}' has {len(le_target.classes_)} classes. Binary expected.")
         y = pd.Series(y_enc, index=y.index, name=target_col)
         print("Target classes (encoded):", dict(enumerate(le_target.classes_)))
     else:
@@ -139,12 +138,25 @@ def prepare_data(df):
             if y.nunique() == 2:
                 y = y.map({y.unique()[0]:0, y.unique()[1]:1})
             else:
-                raise ValueError("Numeric target is not binary. Pipeline expects binary churn target.")
+                raise ValueError("Numeric target is not binary.")
 
-    # 8) encode categorical predictors
+    #Group rare categories (<2%)
+    for c in X.select_dtypes(include="object").columns:
+        top = X[c].value_counts(normalize=True)
+        rare = top[top < 0.02].index
+        if len(rare) > 0:
+            X[c] = X[c].replace(rare, "Other")
+
+    #Create simple engineered ratios if applicable
+    if "MonthlyCharges" in X.columns and "tenure" in X.columns:
+        X["MonthlyChargePerTenure"] = X["MonthlyCharges"] / (X["tenure"] + 1)
+    if "TotalCharges" in X.columns and "tenure" in X.columns:
+        X["TotalChargesPerTenure"] = X["TotalCharges"] / (X["tenure"] + 1)
+
+    # Encode categoricals
     X, le_dict = encode_categoricals(X)
 
-    # 9) fill remaining numeric NaNs
+    # Fill missing numeric values
     for c in X.columns:
         if X[c].isnull().any():
             if X[c].dtype.kind in 'biufc':
@@ -152,31 +164,48 @@ def prepare_data(df):
             else:
                 X[c] = X[c].fillna(-1)
 
+    # Optional balancing (upsampling)
+    if balance:
+     pos = (y == 1).sum()
+     neg = (y == 0).sum()
+     if pos / len(y) < 0.4:
+        print("Applying SMOTE for class balancing...")
+        from imblearn.over_sampling import SMOTE
+        sm = SMOTE(random_state=42)
+        X, y = sm.fit_resample(X, y)
+        print(f"After SMOTE → class balance: {y.value_counts().to_dict()}")
+   
+
     return X, y, le_dict, target_col
 
-# ---------------------------
-# Modeling + SHAP-RFS
-# ---------------------------
-def fit_xgb(X_train, y_train, X_valid=None, y_valid=None, random_state=42, n_estimators=200, max_depth=5, lr=0.1, subsample=0.8, colsample=0.8):
-    # compute scale_pos_weight for imbalance
+
+def fit_xgb(X_train, y_train, X_valid=None, y_valid=None, random_state=42):
     pos = (y_train == 1).sum()
     neg = (y_train == 0).sum()
-    scale_pos_weight = 1.0
-    if pos > 0:
-        scale_pos_weight = neg / max(1, pos)
+    scale_pos_weight = neg / max(1, pos)
+
     model = xgb.XGBClassifier(
-        n_estimators=n_estimators,
-        max_depth=max_depth,
-        learning_rate=lr,
-        subsample=subsample,
-        colsample_bytree=colsample,
+        n_estimators=600,#600
+        learning_rate=0.2,
+        max_depth=6,#6
+        min_child_weight=3, #3
+        subsample=0.85,#0.85
+        colsample_bytree=0.85,#0.85
+        gamma=0.3,#0.3
+        reg_lambda=2,#2
+        reg_alpha=0.1,
+        scale_pos_weight=scale_pos_weight,
+        eval_metric="auc",
         random_state=random_state,
         use_label_encoder=False,
-        eval_metric='logloss',
-        scale_pos_weight=scale_pos_weight,
         n_jobs=-1
     )
-    model.fit(X_train, y_train)
+
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_train, y_train)] if X_valid is None else [(X_valid, y_valid)],
+        verbose=False
+    )
     return model
 
 
@@ -223,7 +252,7 @@ def shap_recursive_feature_elimination(X_train, y_train, X_test, y_test,
         explainer = shap.TreeExplainer(model)
         shap_exp = explainer(Xtr[current_features])
         shap_vals = shap_exp.values
-        # handle multiclass like before
+        # handle multiclass
         if shap_vals.ndim == 3:
             # choose class 1
             shap_vals = shap_vals[:, :, 1]
@@ -242,83 +271,7 @@ def shap_recursive_feature_elimination(X_train, y_train, X_test, y_test,
     print(f"Best ROC-AUC achieved: {best_score:.4f}")
     return best_features, scores
 
-# ---------------------------
-# Main pipeline
-# # ---------------------------
-# def run_pipeline(csv_path, test_size=0.2, random_state=42, min_features=5):
-#     df = pd.read_csv(csv_path)
-#     print(f"Loaded {len(df)} rows, {len(df.columns)} columns.")
-# def run_pipeline(data, test_size=0.2, random_state=42, min_features=5):
-#     """
-#     Accepts:
-#     - data: CSV file path OR pandas DataFrame
-#     """
-#     if isinstance(data, str):
-#         df = pd.read_csv(data)
-#     elif isinstance(data, pd.DataFrame):
-#         df = data.copy()
-#     else:
-#         raise ValueError("Input must be a CSV path or pandas DataFrame")
 
-#     print(f"Loaded {len(df)} rows, {len(df.columns)} columns.")
-
-#     # prepare
-#     X, y, le_dict, target_col = prepare_data(df)
-
-#     # split with safe stratify
-#     stratify = y if (y.value_counts(normalize=True).min() > 0.05 and y.nunique() == 2) else None
-#     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=stratify)
-#     print("Preprocessing completed! Feature shape:", X_train.shape)
-
-#     # baseline model
-#     baseline = fit_xgb(X_train, y_train)
-#     print("\nBaseline Model Performance (Before SHAP-RFS):")
-#     baseline_metrics = evaluate_model(baseline, X_test, y_test, prefix="Baseline: ")
-
-#     # SHAP on baseline (bar)
-#     explainer = shap.TreeExplainer(baseline)
-#     shap_exp = explainer(X_train)
-#     shap_values = shap_exp.values
-#     if shap_values.ndim == 3:
-#         shap_values = shap_values[:,:,1]
-#     plt.figure(figsize=(10,6))
-#     shap.summary_plot(shap_values, X_train, plot_type="bar", max_display=20, show=True)
-#     plt.show()
-
-#     # SHAP-guided RFS
-#     best_features, scores = shap_recursive_feature_elimination(X_train, y_train, X_test, y_test, min_features=min_features)
-
-#     # final model on best features
-#     final_model = fit_xgb(X_train[best_features], y_train)
-#     print("\nFinal Model Performance (After SHAP-RFS):")
-#     final_metrics = evaluate_model(final_model, X_test[best_features], y_test, prefix="Final: ")
-
-#     # SHAP for final model (dot + bar)
-#     explainer = shap.TreeExplainer(final_model)
-#     shap_exp = explainer(X_train[best_features])
-#     shap_vals = shap_exp.values
-#     if shap_vals.ndim == 3:
-#         shap_vals = shap_vals[:,:,1]
-
-#     print("SHAP values shape:", shap_vals.shape)
-#     print("Training data shape:", X_train[best_features].shape)
-
-#     plt.figure(figsize=(10,6))
-#     shap.summary_plot(shap_vals, X_train[best_features], plot_type="bar", max_display=20, show=True)
-#     plt.show()
-
-#     plt.figure(figsize=(10,6))
-#     shap.summary_plot(shap_vals, X_train[best_features], plot_type="dot", max_display=20, show=True)
-#     plt.show()
-
-#     return {
-#         'baseline_metrics': baseline_metrics,
-#         'final_metrics': final_metrics,
-#         'best_features': best_features,
-#         'scores': scores,
-#         'le_dict': le_dict,
-#         'target_col': target_col
-#     }
 def run_pipeline(data, test_size=0.2, random_state=42, min_features=5, show_plots=True):
     """
     Accepts:
@@ -351,7 +304,30 @@ def run_pipeline(data, test_size=0.2, random_state=42, min_features=5, show_plot
     print("\nBaseline Model Performance (Before SHAP-RFS):")
     baseline_metrics = evaluate_model(baseline, X_test, y_test, prefix="Baseline: ")
 
-    # SHAP baseline plot
+    if show_plots:
+        print("\nGenerating Learning Curve (Underfit/Overfit Visualization)...")
+        from sklearn.model_selection import learning_curve
+
+        train_sizes, train_scores, val_scores = learning_curve(
+            baseline, X_train, y_train, cv=5,
+            scoring='accuracy',
+            train_sizes=np.linspace(0.1, 1.0, 5),
+            random_state=random_state
+        )
+        train_mean = np.mean(train_scores, axis=1)
+        val_mean = np.mean(val_scores, axis=1)
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(train_sizes, train_mean, 'o-', label='Training Accuracy')
+        plt.plot(train_sizes, val_mean, 'o-', label='Validation Accuracy')
+        plt.title("Learning Curve: Underfitting vs Overfitting")
+        plt.xlabel("Training Set Size")
+        plt.ylabel("Accuracy")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    # SHAP plot
     if show_plots:
         explainer = shap.TreeExplainer(baseline)
         shap_exp = explainer(X_train)
@@ -362,7 +338,7 @@ def run_pipeline(data, test_size=0.2, random_state=42, min_features=5, show_plot
         shap.summary_plot(shap_values, X_train, plot_type="bar", max_display=20, show=True)
         plt.show()
 
-    # SHAP-guided feature elimination
+    # SHAP feature elimination
     best_features, scores = shap_recursive_feature_elimination(
         X_train, y_train, X_test, y_test, min_features=min_features
     )
@@ -371,7 +347,7 @@ def run_pipeline(data, test_size=0.2, random_state=42, min_features=5, show_plot
     print("\nFinal Model Performance (After SHAP-RFS):")
     final_metrics = evaluate_model(final_model, X_test[best_features], y_test, prefix="Final: ")
 
-    # Final SHAP plots
+    #SHAP plots
     if show_plots:
         explainer = shap.TreeExplainer(final_model)
         shap_exp = explainer(X_train[best_features])
@@ -395,9 +371,9 @@ def run_pipeline(data, test_size=0.2, random_state=42, min_features=5, show_plot
     }
 
 
-# ---------------------------
-# If run as script
-# ---------------------------
+import joblib
+import os
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Universal churn pipeline (SHAP-RFS + XGBoost)")
@@ -406,4 +382,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     results = run_pipeline(args.csv, min_features=args.min_features)
+
+    X, y, _, _ = prepare_data(pd.read_csv(args.csv))
+    xgb_final = fit_xgb(X, y)
+    joblib.dump(xgb_final, "xgb_churn_model.joblib")
+    print(f" Model saved successfully as {os.path.abspath('xgb_churn_model.joblib')}")
+
     print("\nDone.")

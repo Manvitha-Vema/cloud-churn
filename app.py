@@ -1,74 +1,4 @@
-# # from flask import Flask, request, jsonify
-# # import pandas as pd
-# # from churn import run_pipeline  # import your pipeline function
-
-# # app = Flask(__name__)
-
-# # @app.route("/predict", methods=["POST"])
-# # # @app.route("/predict", methods=["POST"])
-# # def predict():
-# #     """
-# #     Accepts:
-# #     1) CSV file in 'file'
-# #     2) JSON object in request body (single row or list of rows)
-# #     """
-# #     try:
-# #         import pandas as pd
-
-# #         # 1) CSV file
-# #         if 'file' in request.files:
-# #             file = request.files['file']
-# #             df = pd.read_csv(file)
-
-# #         # 2) JSON object
-# #         else:
-# #             data = request.get_json()  # must call the method
-# #             if data is None:
-# #                 return jsonify({"error": "No data provided"}), 400
-# #             # if single row dict, convert to list of dicts
-# #             if isinstance(data, dict):
-# #                 data = [data]
-# #             df = pd.DataFrame(data)
-
-# #         # Run your pipeline
-# #         results = run_pipeline(df, test_size=0.2)
-# #         return jsonify({
-# #             "best_features": results['best_features'],
-# #             "baseline_metrics": results['baseline_metrics'],
-# #             "final_metrics": results['final_metrics']
-# #         })
-# #     except Exception as e:
-# #         return jsonify({"error": str(e)}), 500
-
-# # # def predict():
-# # #     """
-# # #     Expects JSON body with key 'data' containing CSV text or file path.
-# # #     """
-# # #     try:
-# # #         # Get uploaded CSV
-# # #         if 'file' in request.files:
-# # #             file = request.files['file']
-# # #             df = pd.read_csv(file)
-# # #         elif 'data' in request.json:
-# # #             from io import StringIO
-# # #             csv_data = request.json['data']
-# # #             df = pd.read_csv(StringIO(csv_data))
-# # #         else:
-# # #             return jsonify({"error": "No data provided"}), 400
-
-# # #         # Run your pipeline
-# # #         results = run_pipeline(df, test_size=0.2)
-# # #         return jsonify({
-# # #             "best_features": results['best_features'],
-# # #             "baseline_metrics": results['baseline_metrics'],
-# # #             "final_metrics": results['final_metrics']
-# # #         })
-# # #     except Exception as e:
-# # #         return jsonify({"error": str(e)}), 500
-
-# # if __name__ == "__main__":
-# #     app.run(host="0.0.0.0", port=5000)
-# # ____________________________________________________________________________________________________________________________
+# ____________________________________________________________________________________________________________________________
 # from flask import Flask, request, jsonify
 # import pandas as pd
 # from churn import run_pipeline  # import your existing pipeline
@@ -145,6 +75,7 @@
 #     app.run(host="0.0.0.0", port=5000)
 # __________________________________________________________________________________________________________________________________________
 import io
+import os
 import pandas as pd
 import numpy as np
 from flask import Flask, request, jsonify
