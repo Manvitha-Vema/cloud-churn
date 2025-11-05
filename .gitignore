@@ -1,21 +1,43 @@
-# Python cache and virtual environment
+# ---------- Python cache ----------
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.log
 
-# Virtual environment
+# ---------- Virtual environments ----------
+venv/
+env/
 churn_env/
 
-# Jupyter notebooks checkpoints
+# ---------- Jupyter checkpoints ----------
 .ipynb_checkpoints/
 
-# Misc
+# ---------- System files ----------
 .DS_Store
-.env
+Thumbs.db
 
-# Elastic Beanstalk Files
+# ---------- Environment / secret files ----------
+.env
+*.env
+
+# ---------- Model & temp files ----------
+*.joblib
+*.pkl
+*.h5
+*.npy
+*.npz
+
+# ---------- Build & deployment artifacts ----------
+*.egg-info/
+dist/
+build/
+
+# ---------- IDE / editor files ----------
+.vscode/
+.idea/
+
+# ---------- Elastic Beanstalk (if not using) ----------
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
